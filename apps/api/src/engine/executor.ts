@@ -20,8 +20,11 @@ import {
   type StepRunStatus,
 } from '@klankish/shared';
 
-import { query } from '../db/client.js';
+import { query, queryOne } from '../db/client.js';
+import { hmacSign } from '../platform/crypto.js';
 import { env } from '../platform/env.js';
+import { mailer } from '../platform/mailer.js';
+import { storage } from '../platform/storage.js';
 import { subLogger } from '../platform/logger.js';
 import { RunContext, type StepResult } from './context.js';
 import { queue } from './queue.js';
@@ -375,16 +378,146 @@ async function dispatch(
       return { status: 'succeeded', output: { held: true } };
     }
 
-    // These need integrations that land in the next phase. Failing with a truthful identity beats
-    // pretending to succeed.
-    case 'email':
-    case 'storage_put':
-    case 'storage_get':
-    case 'webhook':
+    case 'email': {
+      if (!mailer.configured) {
+        throw new StepError(
+          ERROR_CODES.MAIL_NOT_CONFIGURED,
+          'Email is not set up on this instance.',
+          'set RESEND_API_KEY to enable email steps',
+        );
+      }
+      const to = (resolved['to'] ?? step.to) as string[];
+      const subject = String(resolved['subject'] ?? step.subject);
+      try {
+        const sent = await mailer.send({
+          to,
+          subject,
+          ...(resolved['text'] !== undefined && { text: String(resolved['text']) }),
+          ...(resolved['html'] !== undefined && { html: String(resolved['html']) }),
+          ...(step.cc !== undefined && { cc: step.cc }),
+          ...(step.reply_to !== undefined && { replyTo: step.reply_to }),
+        });
+        return {
+          status: 'succeeded',
+          // Recipients are recorded; the body is not. An email body can carry anything, and this
+          // record is read by admins.
+          output: { id: sent.id, provider: sent.provider, recipients: to.length },
+        };
+      } catch (err) {
+        throw new StepError(
+          ERROR_CODES.MAIL_SEND_FAILED,
+          'The email could not be sent.',
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
+
+    case 'storage_put': {
+      const key = String(resolved['object_key'] ?? step.object_key);
+      const content = String(resolved['content'] ?? step.content ?? '');
+      try {
+        const put = await storage.put({
+          key,
+          body: content,
+          ...(step.content_type !== undefined && { contentType: step.content_type }),
+        });
+        return { status: 'succeeded', output: { key: put.key, bytes: put.bytes, checksum: put.checksum } };
+      } catch (err) {
+        throw new StepError(
+          storage.configured ? ERROR_CODES.STORAGE_FAILED : ERROR_CODES.STORAGE_NOT_CONFIGURED,
+          storage.configured ? 'The file could not be stored.' : 'File storage is not set up on this instance.',
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
+
+    case 'storage_get': {
+      const key = String(resolved['object_key'] ?? step.object_key);
+      try {
+        const got = await storage.get(key);
+        if (got === null) {
+          throw new StepError(ERROR_CODES.OBJECT_NOT_FOUND, `No file at "${key}".`);
+        }
+        // `as: 'json'` parses; anything else stays text. A malformed body is data, not a crash —
+        // it is returned as text so the record shows exactly what was there.
+        let body: ExprValue = got.body;
+        if (step.as === 'json') {
+          try {
+            body = JSON.parse(got.body) as ExprValue;
+          } catch {
+            body = got.body;
+          }
+        }
+        return { status: 'succeeded', output: { key, bytes: got.bytes, body } };
+      } catch (err) {
+        if (err instanceof StepError) throw err;
+        throw new StepError(
+          storage.configured ? ERROR_CODES.STORAGE_FAILED : ERROR_CODES.STORAGE_NOT_CONFIGURED,
+          'The file could not be read.',
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
+
+    case 'webhook': {
+      // A webhook is an outbound POST with an HMAC signature, so the receiver can verify it came
+      // from this instance. Delivered inline rather than through the outbox because a task step
+      // must report its own success or failure in the record.
+      const endpointName = String(resolved['endpoint'] ?? step.endpoint);
+      const endpoint = await findWebhookEndpoint(ctx.task.owner_id, endpointName);
+      if (endpoint === null) {
+        throw new StepError(
+          ERROR_CODES.NOT_FOUND,
+          `No webhook endpoint named "${endpointName}".`,
+        );
+      }
+
+      const payload = JSON.stringify({
+        event: String(resolved['event'] ?? step.event),
+        run_id: ctx.run.id,
+        task: ctx.task.name,
+        at: new Date().toISOString(),
+        data: resolved['payload'] ?? null,
+      });
+
+      const started = Date.now();
+      const res = await fetch(endpoint.url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Klankish-Signature': hmacSign(payload, endpoint.secret),
+          'X-Klankish-Event': String(resolved['event'] ?? step.event),
+        },
+        body: payload,
+        signal: AbortSignal.timeout(Math.min(timeout, 30_000)),
+      });
+
+      const output: ExprValue = {
+        status: res.status,
+        ok: res.ok,
+        duration_ms: Date.now() - started,
+      };
+
+      if (!res.ok) {
+        return {
+          status: 'failed',
+          output,
+          error: {
+            identity: ERROR_CODES.HTTP_REQUEST_FAILED,
+            message: `The webhook endpoint returned ${res.status}.`,
+          },
+        };
+      }
+      return { status: 'succeeded', output };
+    }
+
     case 'subtask':
+      // Deliberately still unimplemented. A subtask needs depth limiting, cycle detection across
+      // TASKS (not just steps), and a decision about whether the parent waits — none of which
+      // should be improvised. Failing honestly beats a half-built version.
       throw new StepError(
         ERROR_CODES.STEP_FAILED,
-        `Steps of kind "${step.kind}" are not available yet on this instance.`,
+        'Subtask steps are not available yet on this instance.',
       );
 
     default: {
@@ -549,4 +682,16 @@ function extractRetryAfter(result: StepResult): number | null {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+/** Look up one of the owner's webhook endpoints by name. */
+async function findWebhookEndpoint(
+  ownerId: string,
+  name: string,
+): Promise<{ url: string; secret: string } | null> {
+  return queryOne<{ url: string; secret: string }>(
+    `SELECT url, secret FROM webhook_endpoints
+     WHERE owner_id = $1 AND name = $2 AND enabled = TRUE`,
+    [ownerId, name],
+  );
 }

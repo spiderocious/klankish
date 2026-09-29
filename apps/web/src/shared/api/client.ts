@@ -152,7 +152,7 @@ interface RequestOptions {
   readonly skipAuth?: boolean;
 }
 
-interface ApiResult<T> {
+export interface ApiResult<T> {
   readonly data: T;
   readonly meta?: PaginationMeta;
 }

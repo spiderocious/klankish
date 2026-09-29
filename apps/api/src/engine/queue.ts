@@ -1,5 +1,7 @@
 import { newId, type RunStatus, type RunTrigger } from '@klankish/shared';
 
+import type { PoolClient } from 'pg';
+
 import { query, queryOne, transaction, txQuery, txQueryOne } from '../db/client.js';
 import { env } from '../platform/env.js';
 import { subLogger } from '../platform/logger.js';
@@ -73,102 +75,12 @@ export const queue = {
    * A skipped run is still RECORDED, with status `skipped`. Silently dropping it would make a
    * task that never runs look identical to a task that runs fine.
    */
-  async enqueue(input: EnqueueInput): Promise<RunRow> {
-    return transaction(async (client) => {
-      // Lock the task row so concurrent enqueues for the same task serialise here.
-      const task = await txQueryOne<{
-        id: string;
-        concurrency_policy: 'skip' | 'queue' | 'allow';
-        max_concurrent_runs: number;
-        max_queued: number;
-        status: string;
-      }>(
-        client,
-        `SELECT id, concurrency_policy, max_concurrent_runs, max_queued, status
-         FROM tasks WHERE id = $1 AND is_deleted = FALSE FOR UPDATE`,
-        [input.taskId],
-      );
-
-      if (task === null) throw new Error(`task ${input.taskId} not found`);
-
-      const counts = await txQueryOne<{ running: string; queued: string }>(
-        client,
-        `SELECT
-           count(*) FILTER (WHERE status = 'running')::text AS running,
-           count(*) FILTER (WHERE status = 'queued')::text  AS queued
-         FROM runs WHERE task_id = $1`,
-        [input.taskId],
-      );
-
-      const running = Number(counts?.running ?? '0');
-      const queued = Number(counts?.queued ?? '0');
-
-      let status: RunStatus = 'queued';
-      let errorIdentity: string | null = null;
-      let errorMessage: string | null = null;
-
-      // A manual or retry run deliberately bypasses the policy: the user is standing there asking
-      // for it, and refusing would be baffling. Only scheduled runs are policed.
-      const policed = input.trigger === 'schedule' || input.trigger === 'webhook';
-
-      if (policed) {
-        if (task.concurrency_policy === 'skip' && running + queued > 0) {
-          status = 'skipped';
-          errorIdentity = 'concurrency_skipped';
-          errorMessage = 'A previous run of this task was still going.';
-        } else if (task.concurrency_policy === 'queue' && queued >= task.max_queued) {
-          // An unbounded backlog is worse than a visible refusal: it hides a task that has been
-          // broken for a week behind a thousand pending runs.
-          status = 'skipped';
-          errorIdentity = 'max_queued_exceeded';
-          errorMessage = `Already ${queued} runs waiting (limit ${task.max_queued}).`;
-        } else if (
-          task.concurrency_policy === 'allow' &&
-          running >= task.max_concurrent_runs
-        ) {
-          status = 'skipped';
-          errorIdentity = 'concurrency_skipped';
-          errorMessage = `Already at the limit of ${task.max_concurrent_runs} concurrent runs.`;
-        }
-      }
-
-      const id = newId('run');
-      const rows = await txQuery<RunRow>(
-        client,
-        `INSERT INTO runs (
-           id, task_id, task_version_id, schedule_id, trigger, status,
-           scheduled_for, attempt, parent_run_id, root_run_id,
-           error_identity, error_message, vars, created_by,
-           finished_at
-         ) VALUES (
-           $1, $2, $3, $4, $5, $6,
-           COALESCE($7::timestamptz, now()), $8, $9, $10,
-           $11, $12, $13, $14,
-           CASE WHEN $6::run_status = 'skipped' THEN now() ELSE NULL END
-         )
-         RETURNING *`,
-        [
-          id,
-          input.taskId,
-          input.taskVersionId,
-          input.scheduleId ?? null,
-          input.trigger,
-          status,
-          input.scheduledFor ?? null,
-          input.attempt ?? 1,
-          input.parentRunId ?? null,
-          input.rootRunId ?? id,
-          errorIdentity,
-          errorMessage,
-          JSON.stringify(input.vars ?? {}),
-          input.createdBy ?? null,
-        ],
-      );
-
-      const row = rows[0];
-      if (row === undefined) throw new Error('insert returned no row');
-      return row;
-    });
+  async enqueue(input: EnqueueInput, existing?: PoolClient): Promise<RunRow> {
+    // When the caller is ALREADY inside a transaction, run on their client instead of opening a
+    // second one. Two transactions taking `FOR UPDATE` on `schedules` and `tasks` in opposite
+    // orders is a textbook deadlock, and it is exactly what the scheduler did before this.
+    if (existing !== undefined) return enqueueOn(existing, input);
+    return transaction((client) => enqueueOn(client, input));
   },
 
   /**
@@ -368,3 +280,102 @@ export const queue = {
     };
   },
 };
+
+/**
+ * The enqueue implementation, on a caller-supplied client.
+ *
+ * Locks the task row first so concurrent enqueues for the same task serialise, then applies the
+ * concurrency policy and inserts. Checking "is anything already running?" outside a transaction
+ * is a TOCTOU race: two schedulers both see zero in flight and both enqueue.
+ */
+async function enqueueOn(client: PoolClient, input: EnqueueInput): Promise<RunRow> {
+  const task = await txQueryOne<{
+    id: string;
+    concurrency_policy: 'skip' | 'queue' | 'allow';
+    max_concurrent_runs: number;
+    max_queued: number;
+    status: string;
+  }>(
+    client,
+    `SELECT id, concurrency_policy, max_concurrent_runs, max_queued, status
+     FROM tasks WHERE id = $1 AND is_deleted = FALSE FOR UPDATE`,
+    [input.taskId],
+  );
+
+  if (task === null) throw new Error(`task ${input.taskId} not found`);
+
+  const counts = await txQueryOne<{ running: string; queued: string }>(
+    client,
+    `SELECT
+       count(*) FILTER (WHERE status = 'running')::text AS running,
+       count(*) FILTER (WHERE status = 'queued')::text  AS queued
+     FROM runs WHERE task_id = $1`,
+    [input.taskId],
+  );
+
+  const running = Number(counts?.running ?? '0');
+  const queued = Number(counts?.queued ?? '0');
+
+  let status: RunStatus = 'queued';
+  let errorIdentity: string | null = null;
+  let errorMessage: string | null = null;
+
+  // A manual or retry run deliberately bypasses the policy: the user is standing there asking
+  // for it, and refusing would be baffling. Only scheduled runs are policed.
+  const policed = input.trigger === 'schedule' || input.trigger === 'webhook';
+
+  if (policed) {
+    if (task.concurrency_policy === 'skip' && running + queued > 0) {
+      status = 'skipped';
+      errorIdentity = 'concurrency_skipped';
+      errorMessage = 'A previous run of this task was still going.';
+    } else if (task.concurrency_policy === 'queue' && queued >= task.max_queued) {
+      // An unbounded backlog is worse than a visible refusal: it hides a task that has been
+      // broken for a week behind a thousand pending runs.
+      status = 'skipped';
+      errorIdentity = 'max_queued_exceeded';
+      errorMessage = `Already ${queued} runs waiting (limit ${task.max_queued}).`;
+    } else if (task.concurrency_policy === 'allow' && running >= task.max_concurrent_runs) {
+      status = 'skipped';
+      errorIdentity = 'concurrency_skipped';
+      errorMessage = `Already at the limit of ${task.max_concurrent_runs} concurrent runs.`;
+    }
+  }
+
+  const id = newId('run');
+  const rows = await txQuery<RunRow>(
+    client,
+    `INSERT INTO runs (
+       id, task_id, task_version_id, schedule_id, trigger, status,
+       scheduled_for, attempt, parent_run_id, root_run_id,
+       error_identity, error_message, vars, created_by,
+       finished_at
+     ) VALUES (
+       $1, $2, $3, $4, $5, $6,
+       COALESCE($7::timestamptz, now()), $8, $9, $10,
+       $11, $12, $13, $14,
+       CASE WHEN $6::run_status = 'skipped' THEN now() ELSE NULL END
+     )
+     RETURNING *`,
+    [
+      id,
+      input.taskId,
+      input.taskVersionId,
+      input.scheduleId ?? null,
+      input.trigger,
+      status,
+      input.scheduledFor ?? null,
+      input.attempt ?? 1,
+      input.parentRunId ?? null,
+      input.rootRunId ?? id,
+      errorIdentity,
+      errorMessage,
+      JSON.stringify(input.vars ?? {}),
+      input.createdBy ?? null,
+    ],
+  );
+
+  const row = rows[0];
+  if (row === undefined) throw new Error('insert returned no row');
+  return row;
+}

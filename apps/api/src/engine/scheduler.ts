@@ -106,7 +106,12 @@ export class Scheduler {
     try {
       // Process one schedule per transaction rather than all in one: a single bad schedule then
       // cannot roll back the work done for every other one in the tick.
-      for (;;) {
+      //
+      // Bounded per tick. Without a bound, a schedule that somehow stays due would be picked up
+      // again and again inside this same loop and the tick would never return — the next tick is
+      // only a few seconds away, so stopping early costs nothing.
+      const MAX_PER_TICK = 500;
+      for (let i = 0; i < MAX_PER_TICK; i += 1) {
         const processed = await this.processOneDue();
         if (processed === null) break;
         if (processed.fired) fired += 1;
@@ -149,15 +154,48 @@ export class Scheduler {
       const now = new Date();
 
       // --- advance past missed fires ---
-      // Count how many were missed, but only actually fire up to MAX_CATCHUP_FIRES of them.
+      //
+      // Catching up is NOT a matter of walking every missed fire. A minutely schedule that was
+      // down for a week has ~10,000 of them, and stepping through one at a time inside an open
+      // transaction is how a scheduler tick turns into a two-minute lock.
+      //
+      // So the walk is hard-bounded, and once the bound is hit the schedule is jumped straight
+      // to the next fire after NOW. The behaviour is identical (fire at most MAX_CATCHUP_FIRES
+      // and move on); only the cost differs.
+      const WALK_LIMIT = 200;
+
       let cursor = dueAt;
       let missed = 0;
       let nextAfter: Date | null = computeNext(schedule, cursor);
 
-      while (nextAfter !== null && nextAfter <= now && missed < 10_000) {
+      while (nextAfter !== null && nextAfter <= now && missed < WALK_LIMIT) {
         missed += 1;
         cursor = nextAfter;
         nextAfter = computeNext(schedule, cursor);
+      }
+
+      // Still behind after the walk limit: skip ahead rather than grinding.
+      if (nextAfter !== null && nextAfter <= now) {
+        log.warn(
+          { schedule_id: schedule.id, walked: missed },
+          'schedule is far behind — jumping forward instead of walking every missed fire',
+        );
+        nextAfter = computeNext(schedule, now);
+        // A schedule whose next fire never advances past now would be returned by the query
+        // forever, and the tick loop would spin. Disabling it is drastic but honest: something
+        // about this schedule is wrong, and it is visible rather than silently hot-looping.
+        if (nextAfter !== null && nextAfter <= now) {
+          log.error(
+            { schedule_id: schedule.id, kind: schedule.kind },
+            'schedule cannot advance past now — disabling it to avoid a hot loop',
+          );
+          await txQuery(
+            client,
+            'UPDATE schedules SET enabled = FALSE, next_fire_at = NULL WHERE id = $1',
+            [schedule.id],
+          );
+          return { fired: false };
+        }
       }
 
       if (missed > env.MAX_CATCHUP_FIRES) {
@@ -181,17 +219,26 @@ export class Scheduler {
           schedule.jitter_ms > 0 ? Math.floor(Math.random() * schedule.jitter_ms) : 0;
         const scheduledFor = new Date(dueAt.getTime() + jitter).toISOString();
 
-        // enqueue() applies the concurrency policy in its own transaction. It is deliberately NOT
-        // joined to this one: the schedule must advance even if the run is skipped, or a task
-        // that is always busy would have its schedule frozen forever.
-        await queue.enqueue({
-          taskId: schedule.task_id,
-          taskVersionId: schedule.current_version_id,
-          trigger: 'schedule',
-          scheduleId: schedule.id,
-          scheduledFor,
-          createdBy: schedule.owner_id,
-        });
+        // Enqueue on THIS transaction's client, not a new one.
+        //
+        // The earlier version opened a second transaction here, which meant one transaction held
+        // `FOR UPDATE` on `schedules` while waiting for `FOR UPDATE` on `tasks` — and a
+        // concurrent scheduler could hold them the other way round. That is a deadlock, and it
+        // reliably hung a tick under concurrency.
+        //
+        // Joining the transaction also keeps the run and the schedule advance atomic: a crash
+        // between them can no longer double-fire or skip.
+        await queue.enqueue(
+          {
+            taskId: schedule.task_id,
+            taskVersionId: schedule.current_version_id,
+            trigger: 'schedule',
+            scheduleId: schedule.id,
+            scheduledFor,
+            createdBy: schedule.owner_id,
+          },
+          client,
+        );
 
         didFire = true;
       }
