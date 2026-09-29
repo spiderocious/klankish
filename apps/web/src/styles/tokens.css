@@ -1,0 +1,312 @@
+/* ============================================================================
+   KLANKISH — ledger broadsheet foundation
+
+   The stance is dipstick's: a deep-paperback accounting ledger crossed with a
+   financial daily. Chosen because a ledger is literally what this product
+   keeps — an immutable, ordered account of what ran and what came back.
+
+   THE LAW, checkable by opening any screen:
+
+     Every block is either DEFINITION or RECORD.
+
+     DEFINITION is what you wrote — task names, descriptions, step config.
+       Source Serif 4 leads. Sentence case. It can change.
+
+     RECORD is what happened — run ids, timestamps, durations, status codes,
+       payloads, exit codes. IBM Plex Mono, tabular figures. It cannot change.
+
+     A serif never states a measured value.
+     A mono figure never states an intention.
+
+   Light values are dipstick's, unchanged. Dark is DERIVED, holding four
+   invariants: hue and role preserved (emerald stays the single accent,
+   oxblood the only red); warm near-black, never cold grey or pure black;
+   body text >= 7:1 contrast in both themes; no pure white — the brightest
+   dark-mode text is light mode's paper, so the themes reflect each other.
+   ============================================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,500;0,8..60,600;0,8..60,700;1,8..60,400&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+:root {
+  /* ---------- Paper & ink ---------- */
+  --paper:        #F2EDE2;
+  --paper-deep:   #ECE5D4;
+  --sheet:        #FBF7EC;
+  --sheet-2:      #F7F2E4;
+  --sheet-edge:   #D6CDB8;
+  --ink:          #1A1714;
+  --ink-2:        #3D3833;
+  --ink-3:        #6E665B;
+  --ink-4:        #A39A8A;
+  --hair:         #D6CDB8;
+  --hair-soft:    #E5DECC;
+
+  /* ---------- Emerald — the single accent ----------
+     Posted / confirmed / succeeded, primary actions, the brand mark.
+     Never decoration, never nav chrome. */
+  --emerald-50:   #E7F4ED;
+  --emerald-100:  #C7E4D2;
+  --emerald-200:  #98CDAF;
+  --emerald-400:  #2D8A5C;
+  --emerald-600:  #0E5C3A;
+  --emerald-700:  #0A4A2E;
+  --emerald-900:  #06301E;
+
+  /* ---------- States ----------
+     Oxblood is the ONLY red, reserved for failure and irreversible actions.
+     Amber is everything else that needs attention. Ink-blue is system-neutral. */
+  --short:        #9A1F18;
+  --short-bg:     #F8E7E4;
+  --short-edge:   #E6BFBC;
+
+  --watch:        #8E5A0E;
+  --watch-bg:     #F8EED8;
+  --watch-edge:   #E2CC95;
+
+  --info:         #1F4D7A;
+  --info-bg:      #E8EEF4;
+  --info-edge:    #BFD0E1;
+
+  --ok:           var(--emerald-700);
+  --ok-bg:        var(--emerald-50);
+  --ok-edge:      var(--emerald-200);
+
+  /* ---------- Step-kind marks ----------
+     Tiny inline squares on a step row. Never fills, never backgrounds.
+     (Replaces dipstick's PMS/AGO/DPK product marks.) */
+  --k-http:       #1F4D7A;
+  --k-shell:      #6B4E8E;
+  --k-branch:     #8E5A0E;
+  --k-transform:  #0E5C3A;
+  --k-email:      #A6522C;
+  --k-storage:    #4A5D3A;
+  --k-assert:     #6E665B;
+
+  /* ---------- Type ---------- */
+  --serif: 'Source Serif 4', 'Source Serif Pro', Georgia, serif;
+  --sans:  'Inter', system-ui, -apple-system, sans-serif;
+  --mono:  'IBM Plex Mono', ui-monospace, 'SF Mono', monospace;
+
+  --track-display:  -0.018em;
+  --track-body:      0;
+  --track-label:     0.01em;
+  --track-overline:  0.18em;
+
+  /* ---------- Geometry ----------
+     Tight radii: this is paper, not a card UI. Hairlines instead of shadows. */
+  --r-sharp: 2px;
+  --r-soft:  4px;
+  --r-card:  3px;
+  --r-pill:  9999px;
+  --gutter:  24px;
+
+  --focus-ring: 0 0 0 3px rgba(14, 92, 58, 0.28);
+
+  color-scheme: light;
+}
+
+/* ============================================================================
+   DARK — derived, not invented.
+   Applied only via an explicit attribute: light is the stated default, so a
+   first-time visitor on a dark-mode OS still gets light.
+   ============================================================================ */
+:root[data-theme='dark'] {
+  --paper:        #14120F;
+  --paper-deep:   #0E0C0A;
+  --sheet:        #1C1916;
+  --sheet-2:      #221E1A;
+  --sheet-edge:   #322C26;
+  --ink:          #F2EDE2;
+  --ink-2:        #D6CFC2;
+  --ink-3:        #9A9184;
+  --ink-4:        #6B6459;
+  --hair:         #322C26;
+  --hair-soft:    #262119;
+
+  /* The emerald that reads as "deep" on cream reads as "muddy" on near-black,
+     so the usable accent shifts lighter. Same hue, same role. */
+  --emerald-50:   #0A2418;
+  --emerald-100:  #0F3A26;
+  --emerald-200:  #1C5C3C;
+  --emerald-400:  #3FA873;
+  --emerald-600:  #4FBF86;
+  --emerald-700:  #6FD3A0;
+  --emerald-900:  #C7E4D2;
+
+  --short:        #E8837A;
+  --short-bg:     #2A1614;
+  --short-edge:   #5C2A25;
+
+  --watch:        #D9A44E;
+  --watch-bg:     #261C0D;
+  --watch-edge:   #5A4420;
+
+  --info:         #7AA8D4;
+  --info-bg:      #111E29;
+  --info-edge:    #2A4056;
+
+  --ok:           var(--emerald-600);
+  --ok-bg:        var(--emerald-50);
+  --ok-edge:      var(--emerald-200);
+
+  --k-http:       #7AA8D4;
+  --k-shell:      #A88FC4;
+  --k-branch:     #D9A44E;
+  --k-transform:  #4FBF86;
+  --k-email:      #D4906B;
+  --k-storage:    #9AAF83;
+  --k-assert:     #9A9184;
+
+  --focus-ring: 0 0 0 3px rgba(79, 191, 134, 0.32);
+
+  color-scheme: dark;
+}
+
+/* ---------- Reset ---------- */
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body, #root { height: 100%; }
+
+body {
+  margin: 0;
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--paper);
+  letter-spacing: var(--track-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: 'kern', 'calt', 'ss01';
+}
+
+/* ---------- Type primitives ---------- */
+.serif {
+  font-family: var(--serif);
+  font-weight: 500;
+  letter-spacing: var(--track-display);
+}
+
+/* Every figure in the product goes through this: tabular so columns of numbers
+   line up, lining so they sit on the baseline with capitals. */
+.mono {
+  font-family: var(--mono);
+  font-feature-settings: 'tnum' 1, 'lnum' 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.overline {
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: var(--track-overline);
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+/* A record id: r_01HV…, sr_…, t_… */
+.rec {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-3);
+  letter-spacing: 0.04em;
+  font-feature-settings: 'tnum' 1, 'lnum' 1;
+}
+
+/* The hero readout — a duration, a count, a percentage. */
+.read {
+  font-family: var(--mono);
+  font-feature-settings: 'tnum' 1, 'lnum' 1;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  color: var(--ink);
+  letter-spacing: -0.02em;
+  line-height: 0.95;
+}
+.read-xl { font-size: 44px; }
+.read-lg { font-size: 32px; }
+.read-md { font-size: 24px; }
+.read-sm { font-size: 18px; }
+.read .u {
+  font-family: var(--sans);
+  font-size: 0.38em;
+  color: var(--ink-3);
+  margin-left: 4px;
+  letter-spacing: 0.02em;
+  font-weight: 500;
+}
+
+/* A manager's note / a user's own prose. */
+.dictated {
+  font-family: var(--serif);
+  font-style: italic;
+  color: var(--ink-2);
+  line-height: 1.45;
+}
+
+/* ---------- Focus ---------- */
+:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--r-sharp);
+}
+
+::selection {
+  background: rgba(14, 92, 58, 0.22);
+  color: var(--ink);
+}
+:root[data-theme='dark'] ::selection {
+  background: rgba(79, 191, 134, 0.28);
+  color: var(--ink);
+}
+
+/* ---------- Scrollbar ---------- */
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--sheet-edge);
+  border-radius: var(--r-pill);
+}
+::-webkit-scrollbar-thumb:hover { background: var(--ink-4); }
+
+/* ============================================================================
+   THE ONE AMBIENT LOOP
+   A single pulsing dot marks a run that is currently executing. If a second
+   thing in this product animates ambiently, one of them is wrong.
+   ============================================================================ */
+@keyframes klankish-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(14, 92, 58, 0.45); }
+  100% { box-shadow: 0 0 0 8px rgba(14, 92, 58, 0); }
+}
+:root[data-theme='dark'] .pulse {
+  animation-name: klankish-pulse-dark;
+}
+@keyframes klankish-pulse-dark {
+  0%   { box-shadow: 0 0 0 0 rgba(79, 191, 134, 0.5); }
+  100% { box-shadow: 0 0 0 8px rgba(79, 191, 134, 0); }
+}
+.pulse {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--emerald-600);
+  animation: klankish-pulse 1.6s ease-out infinite;
+  flex-shrink: 0;
+}
+
+/* A new record arriving over SSE flashes once. Records are INSCRIBED, not slid
+   into place, so there is no transform — only a brief tint. */
+@keyframes klankish-arrive {
+  from { background-color: var(--emerald-50); }
+  to   { background-color: transparent; }
+}
+.arriving { animation: klankish-arrive 400ms ease-out; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .pulse { animation: none; }
+}

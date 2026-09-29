@@ -1,0 +1,10 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+# Build scripts are blocked by default (supply-chain hygiene). These two are
+# approved explicitly because they genuinely need to compile:
+#   argon2  — native N-API binding for password hashing
+#   esbuild — links its platform binary
+allowBuilds:
+  argon2: true
+  esbuild: true

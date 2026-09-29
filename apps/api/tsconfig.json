@@ -1,0 +1,22 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2023"],
+    "types": ["node"],
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "composite": true
+  },
+  // Project references, not path aliases: with aliases pointing at sibling SOURCE files, tsc
+  // pulls those files into this program and then rejects them for sitting outside rootDir.
+  // References make tsc consume the packages' emitted declarations instead, which is also what
+  // makes an incremental build work.
+  "references": [
+    { "path": "../../packages/shared" },
+    { "path": "../../packages/expr" }
+  ],
+  "include": ["src/**/*"],
+  "exclude": ["src/**/*.test.ts", "src/**/*.integration.test.ts"]
+}
