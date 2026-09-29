@@ -112,12 +112,14 @@ export function Field({
   children,
   className,
 }: {
-  label?: string;
-  hint?: string;
-  error?: string;
-  required?: boolean;
+  // `| undefined` is explicit because exactOptionalPropertyTypes distinguishes "absent" from
+  // "present and undefined", and `error={maybeUndefined}` is ordinary React.
+  label?: string | undefined;
+  hint?: string | undefined;
+  error?: string | undefined;
+  required?: boolean | undefined;
   children: ReactNode;
-  className?: string;
+  className?: string | undefined;
 }) {
   return (
     <div className={cn('flex flex-col gap-1', className)}>
@@ -302,10 +304,10 @@ export function Readout({
   className,
 }: {
   value: string | number;
-  unit?: string;
-  size?: 'sm' | 'md' | 'lg' | 'xl';
-  tone?: 'ok' | 'fail' | 'watch';
-  className?: string;
+  unit?: string | undefined;
+  size?: 'sm' | 'md' | 'lg' | 'xl' | undefined;
+  tone?: 'ok' | 'fail' | 'watch' | undefined;
+  className?: string | undefined;
 }) {
   return (
     <span
@@ -336,7 +338,7 @@ export function PageHeader({
   actions,
 }: {
   title: string;
-  subtitle?: string;
+  subtitle?: string | undefined;
   meta?: ReactNode;
   actions?: ReactNode;
 }) {
@@ -395,7 +397,7 @@ export function EmptyState({
 }: {
   icon?: ReactNode;
   title: string;
-  description?: string;
+  description?: string | undefined;
   action?: ReactNode;
 }) {
   return (
@@ -422,7 +424,7 @@ export function ErrorState({
   onRetry,
 }: {
   message: string;
-  onRetry?: () => void;
+  onRetry?: (() => void) | undefined;
 }) {
   return (
     <div className="flex flex-col items-center justify-center gap-3 px-6 py-16 text-center">

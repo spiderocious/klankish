@@ -87,6 +87,30 @@ because it will look like a bug to whoever sees it first.
 
 ---
 
+## Bugs found by testing (kept as a record)
+
+Three real defects surfaced while verifying, not while writing. Recorded because each one is the
+kind that would otherwise have shipped and been found at 3am.
+
+**Scheduler/queue deadlock.** `processOneDue` held a transaction with `FOR UPDATE` on `schedules`
+and then called `queue.enqueue`, which opened a SECOND transaction taking `FOR UPDATE` on `tasks`.
+A concurrent scheduler taking those locks in the other order deadlocked, and the tick hung forever.
+Found by a test that runs three schedulers concurrently. Fixed by making `enqueue` accept the
+caller's client and join the existing transaction — which also makes the run and the schedule
+advance atomic, so a crash between them can no longer double-fire.
+
+**`describeCron` rendered step expressions positionally.** `*/15 * * * *` came out as
+"Every hour at :*/15". Found by looking at a real task's schedule card in the browser. A step
+expression describes a FREQUENCY and needs its own phrasing; there is now a test asserting that no
+description ever contains a raw `*` or `/`.
+
+**Query params could not be booleans.** Ajv ran with `coerceTypes: false` globally, which is right
+for request bodies (silent coercion hides a client type error) and impossible for query strings,
+where everything arrives as a string. `?all_users=true` failed validation with "Must be boolean".
+Fixed by splitting the validator compiler: coercion for querystring/params, strict for bodies.
+
+---
+
 ## Things that will look wrong but are not
 
 Recorded because each one will otherwise cost the next engineer an hour.

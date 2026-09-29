@@ -8,6 +8,7 @@ import { useRuns } from '@features/runs/api/use-runs';
 import { ROUTES } from '@shared/constants/routes';
 import { useTheme } from '@shared/providers/theme-provider';
 import { cn } from '@shared/utils/cn';
+import { list } from '@shared/utils/list';
 
 import { RunStatusFlag, formatRelative } from './status.js';
 
@@ -75,7 +76,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
 
         <nav className="mt-5 flex flex-col gap-0.5">
-          <Repeat each={MAIN_NAV}>
+          <Repeat each={list(MAIN_NAV)}>
             {(item) => (
               <NavLink key={item.to} to={item.to} end={item.end ?? false} className={navClasses}>
                 <item.icon size={16} className="shrink-0 opacity-70" />
@@ -89,7 +90,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="mt-6">
             <p className="overline px-1.5 pb-2">Admin</p>
             <nav className="flex flex-col gap-0.5">
-              <Repeat each={ADMIN_NAV}>
+              <Repeat each={list(ADMIN_NAV)}>
                 {(item) => (
                   <NavLink
                     key={item.to}
@@ -114,7 +115,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             fallback={<p className="px-1.5 text-[11px] text-ink-4">No runs yet.</p>}
           >
             <div className="flex flex-col">
-              <Repeat each={recentRuns?.items ?? []}>
+              <Repeat each={list(recentRuns?.items)}>
                 {(run: RunView) => (
                   <button
                     key={run.id}

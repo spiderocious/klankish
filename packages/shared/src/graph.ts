@@ -158,7 +158,14 @@ export interface EmailStep extends StepCommon {
 
 export interface StoragePutStep extends StepCommon {
   readonly kind: 'storage_put';
-  readonly key: string;
+  /**
+   * The object key in storage.
+   *
+   * Named `object_key`, NOT `key`: every step already has a `key` of its own (its identifier in
+   * the graph), and reusing the name made the two silently collide — the step key won and the
+   * object key was unreachable. Found while writing a test for this step.
+   */
+  readonly object_key: string;
   /** Literal content, or an expression resolving to it. */
   readonly content: string;
   readonly content_type?: string;
@@ -166,7 +173,8 @@ export interface StoragePutStep extends StepCommon {
 
 export interface StorageGetStep extends StepCommon {
   readonly kind: 'storage_get';
-  readonly key: string;
+  /** The object key in storage. See the note on StoragePutStep. */
+  readonly object_key: string;
   readonly as?: 'text' | 'json';
 }
 

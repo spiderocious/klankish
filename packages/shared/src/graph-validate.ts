@@ -326,12 +326,12 @@ function validateStepShape(step: Step, errors: GraphIssue[], warnings: GraphIssu
     }
 
     case 'storage_put': {
-      if (step.key.trim() === '') bad('a storage key is required.', 'key');
+      if (step.object_key.trim() === '') bad('a storage key is required.', 'object_key');
       break;
     }
 
     case 'storage_get': {
-      if (step.key.trim() === '') bad('a storage key is required.', 'key');
+      if (step.object_key.trim() === '') bad('a storage key is required.', 'object_key');
       break;
     }
 

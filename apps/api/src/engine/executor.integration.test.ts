@@ -28,6 +28,9 @@ const hits = new Map<string, number>();
 /** What the /echo-auth endpoint last received, for asserting the real outbound value. */
 let lastAuthHeader: string | null = null;
 
+/** The signature the /created endpoint last received, for asserting webhook signing. */
+let lastWebhookSignature: string | null = null;
+
 beforeAll(async () => {
   await runMigrations();
 
@@ -86,6 +89,8 @@ beforeAll(async () => {
         return;
 
       case '/created':
+        lastWebhookSignature =
+          (req.headers['x-klankish-signature'] as string | undefined) ?? null;
         send(201, { id: 'new-thing' });
         return;
 
@@ -112,6 +117,7 @@ beforeEach(async () => {
   await truncateAll();
   hits.clear();
   lastAuthHeader = null;
+  lastWebhookSignature = null;
 
   userId = newId('user');
   await query(
@@ -694,5 +700,100 @@ describe('the record', () => {
     );
     expect(durations.map((d) => d.idx)).toEqual([0, 1, 2]);
     expect(durations[1]?.duration_ms).toBeGreaterThanOrEqual(15);
+  });
+});
+
+describe('integration steps', () => {
+  it('fails an email step with a clear identity when mail is not configured', async () => {
+    // Degrade honestly: an unconfigured instance must say so, not pretend the email went out.
+    const { result, steps } = await runGraph({
+      version: 1,
+      entry: 'mail',
+      steps: [
+        {
+          kind: 'email',
+          key: 'mail',
+          to: ['someone@example.test'],
+          subject: 'Test',
+          text: 'Body',
+          next: null,
+          retry: { max_attempts: 1, backoff: 'fixed', base_ms: 1, max_ms: 1, jitter: false },
+        },
+      ],
+    });
+
+    expect(result.status).toBe('failed');
+    expect(result.error?.identity).toBe('mail_not_configured');
+    const err = steps[0]?.error as { identity: string; message: string };
+    expect(err.message).toContain('not set up');
+  });
+
+  it('fails a storage step with a clear identity when storage is not configured', async () => {
+    const { result } = await runGraph({
+      version: 1,
+      entry: 'put',
+      steps: [
+        {
+          kind: 'storage_put',
+          key: 'put',
+          object_key: 'reports/daily.json',
+          content: 'hello',
+          next: null,
+          retry: { max_attempts: 1, backoff: 'fixed', base_ms: 1, max_ms: 1, jitter: false },
+        },
+      ],
+    });
+
+    expect(result.status).toBe('failed');
+    expect(result.error?.identity).toBe('storage_not_configured');
+  });
+
+  it('fails a webhook step when the named endpoint does not exist', async () => {
+    const { result } = await runGraph({
+      version: 1,
+      entry: 'hook',
+      steps: [
+        {
+          kind: 'webhook',
+          key: 'hook',
+          endpoint: 'nonexistent',
+          event: 'test.event',
+          next: null,
+          retry: { max_attempts: 1, backoff: 'fixed', base_ms: 1, max_ms: 1, jitter: false },
+        },
+      ],
+    });
+
+    expect(result.status).toBe('failed');
+    expect(result.error?.identity).toBe('not_found');
+  });
+
+  it('delivers a webhook to a registered endpoint with an HMAC signature', async () => {
+    await query(
+      `INSERT INTO webhook_endpoints (id, owner_id, name, url, secret, enabled)
+       VALUES ($1, $2, 'local', $3, 'shhh', TRUE)`,
+      [newId('webhook'), userId, `${baseUrl}/created`],
+    );
+
+    const { result, steps } = await runGraph({
+      version: 1,
+      entry: 'hook',
+      steps: [
+        {
+          kind: 'webhook',
+          key: 'hook',
+          endpoint: 'local',
+          event: 'run.finished',
+          payload: { hello: 'world' },
+          next: null,
+        },
+      ],
+    });
+
+    expect(result.status).toBe('succeeded');
+    const out = steps[0]?.output as { status: number; ok: boolean };
+    expect(out.ok).toBe(true);
+    expect(out.status).toBe(201);
+    expect(lastWebhookSignature).not.toBe(null);
   });
 });
