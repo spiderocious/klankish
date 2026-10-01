@@ -1,0 +1,22 @@
+# Klankish on Railway.
+#
+# ONE service + a Postgres plugin is the whole deployment. The queue lives in
+# Postgres, so the worker and scheduler run inside this same process
+# (PROCESS_ROLE=all) and can be split onto their own services later without
+# touching code.
+
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "node apps/api/dist/server.js"
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 10
+
+# Migrations run ONCE per deploy, before the new version receives traffic.
+# Running them from application startup instead would have N booting replicas
+# racing each other through the same DDL.
+preDeployCommand = "node apps/api/dist/db/migrate-cli.js"

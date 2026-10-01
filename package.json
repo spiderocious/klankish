@@ -3,16 +3,22 @@
   "version": "0.1.0",
   "private": true,
   "packageManager": "pnpm@11.13.0",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
-    "build": "pnpm -r build",
+    "build": "pnpm --filter @klankish/expr build && pnpm --filter @klankish/shared build && pnpm --filter @klankish/api build && pnpm --filter @klankish/web build",
     "typecheck": "pnpm -r typecheck",
     "lint": "pnpm -r lint",
     "test": "pnpm -r test",
     "test:integration": "pnpm --filter @klankish/api test:integration",
     "dev": "pnpm --parallel --filter @klankish/api --filter @klankish/web dev",
     "migrate": "pnpm --filter @klankish/api migrate",
-    "seed": "pnpm --filter @klankish/api seed"
+    "seed": "pnpm --filter @klankish/api seed",
+    "start": "node apps/api/dist/server.js",
+    "migrate:prod": "node apps/api/dist/db/migrate-cli.js",
+    "docker:build": "docker build -t klankish .",
+    "docker:run": "docker run --rm -p 3000:3000 --env-file .env klankish"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
