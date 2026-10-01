@@ -16,6 +16,7 @@ import { register as registerTasks } from './features/tasks/tasks.routes.js';
 import { runWithContext, setContextActor, type RequestContext } from './platform/context.js';
 import { env, isProd } from './platform/env.js';
 import { registerErrorHandler } from './platform/error-handler.js';
+import { registerWebServing } from './platform/serve-web.js';
 import { logger } from './platform/logger.js';
 
 /**
@@ -196,8 +197,12 @@ export async function buildApp(): Promise<FastifyInstance> {
   registerSecrets(app);
   registerDashboard(app);
 
-  // MUST be last: anything registered after this cannot catch errors.
+  // MUST be last among error handling: anything registered after this cannot catch errors.
   registerErrorHandler(app);
+
+  // AFTER the error handler, because it replaces the notFoundHandler with one that falls back to
+  // index.html for navigations. Registered after every API route so it can never shadow one.
+  await registerWebServing(app);
 
   return app;
 }

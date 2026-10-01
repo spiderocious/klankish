@@ -1,0 +1,67 @@
+# Local self-hosting: `docker compose up`.
+#
+# This is the "try it on my own machine" path. For Railway, see docs/deployment.md —
+# there you get a managed Postgres and only the app image is built.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: klankish
+      POSTGRES_PASSWORD: klankish
+      POSTGRES_DB: klankish
+    ports:
+      - '5433:5432'   # 5433 on the host, so it cannot collide with a local Postgres
+    volumes:
+      - klankish-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # The app must not start before Postgres can actually answer, or the first boot
+      # fails its own database check and exits.
+      test: ['CMD-SHELL', 'pg_isready -U klankish -d klankish']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    build: .
+    command: ['node', 'apps/api/dist/db/migrate-cli.js']
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://klankish:klankish@postgres:5432/klankish
+      # Migrations do not use these, but env parsing runs at import and fails loudly
+      # without them.
+      JWT_SECRET: local-dev-only-jwt-secret-not-for-production-use
+      JWT_REFRESH_SECRET: local-dev-only-refresh-secret-not-for-production
+      ENCRYPTION_KEY: local-dev-only-encryption-key-not-for-prod
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: 'no'
+
+  app:
+    build: .
+    ports:
+      - '3000:3000'
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      PROCESS_ROLE: all
+      DATABASE_URL: postgres://klankish:klankish@postgres:5432/klankish
+      APP_URL: http://localhost:3000
+      CORS_ORIGINS: http://localhost:3000
+      # CHANGE THESE before exposing this to anything. The server refuses to start in
+      # production with the built-in dev placeholders, so these are real values that are
+      # still only safe on your own machine.
+      JWT_SECRET: local-dev-only-jwt-secret-not-for-production-use
+      JWT_REFRESH_SECRET: local-dev-only-refresh-secret-not-for-production
+      ENCRYPTION_KEY: local-dev-only-encryption-key-not-for-prod
+      LOG_LEVEL: info
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+volumes:
+  klankish-pgdata:

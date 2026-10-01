@@ -55,6 +55,19 @@ function isFastifyError(err: unknown): err is FastifyError {
   return typeof err === 'object' && err !== null && 'code' in err;
 }
 
+/**
+ * Where the built SPA lives, once `registerWebServing` has found it.
+ *
+ * Held here because Fastify allows exactly ONE notFoundHandler per instance, so the SPA fallback
+ * and the JSON 404 must be the same function. Keeping both in one place also means there is only
+ * one implementation of the error envelope.
+ */
+let spaRoot: string | null = null;
+
+export function setSpaRoot(root: string | null): void {
+  spaRoot = root;
+}
+
 export function registerErrorHandler(app: FastifyInstance): void {
   app.setErrorHandler((err: unknown, request: FastifyRequest, reply: FastifyReply) => {
     const request_id = getRequestId();
@@ -162,8 +175,25 @@ export function registerErrorHandler(app: FastifyInstance): void {
   });
 
   // An unmatched route must return the same envelope shape as everything else, or clients need
-  // two parsers.
+  // two parsers — UNLESS it is a browser navigation to a client-side route, which has no file on
+  // disk and must receive the SPA shell instead.
   app.setNotFoundHandler((request: FastifyRequest, reply: FastifyReply) => {
+    const isApi =
+      request.url.startsWith('/api/') ||
+      request.url.startsWith('/health') ||
+      request.url.startsWith('/ready') ||
+      request.url.startsWith('/docs') ||
+      request.url.startsWith('/metrics');
+
+    const wantsHtml = (request.headers.accept ?? '').includes('text/html');
+
+    // A hard refresh on /runs/r_01HV… must serve the shell, not a 404. A typo'd /api/ path must
+    // still get the envelope, or a client would try to parse HTML as JSON.
+    if (spaRoot !== null && !isApi && request.method === 'GET' && wantsHtml) {
+      void reply.type('text/html').sendFile('index.html');
+      return;
+    }
+
     const request_id = getRequestId();
     void reply.code(404).send({
       error: {
